@@ -1,0 +1,32 @@
+import json
+from langchain_openai import ChatOpenAI
+from langchain.schema import SystemMessage, HumanMessage
+
+def linguist_node(state: AgentState):
+    """调用 LLM 进行生词提取和语法分析"""
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0) # 建议用 mini 节省成本
+    
+    # 1. 加载提示词模板
+    with open("prompts/linguist.md", "r", encoding="utf-8") as f:
+        system_prompt = f.read()
+    
+    # 2. 注入动态上下文（已知单词）
+    known_words_str = ", ".join(state['known_words'])
+    user_content = f"待分析文本：{state['input_text']}\n\n注意：以下单词用户已掌握，请在词汇表中剔除：{known_words_str}"
+    
+    # 3. 发起请求
+    response = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_content)
+    ])
+    
+    # 4. 解析结果 (由于 Prompt 要求 JSON 格式)
+    try:
+        # 兼容处理 LLM 可能返回的 Markdown 标签
+        clean_content = response.content.replace("```json", "").replace("```", "").strip()
+        analysis = json.loads(clean_content)
+    except Exception as e:
+        print(f"解析失败: {e}")
+        analysis = {"vocabulary": [], "grammar_points": []}
+        
+    return {"analysis_result": analysis}
