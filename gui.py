@@ -8,7 +8,11 @@ from main import (
     mark_word_as_mastered,
     get_all_words_from_csv
 )  # 导入 app 和记忆加载函数
+# 初始化 Session State 用于保存当前会话的历史记录
+if 'session_history' not in st.session_state:
+    st.session_state.session_history = []
 
+st.set_page_config(page_title="LingoContext AI", layout="wide")
 st.set_page_config(page_title="LingoContext AI", layout="wide")
 
 # 添加朗读功能的 JavaScript 代码（使用 components.html 确保在所有页面可用）
@@ -124,7 +128,20 @@ with col1:
                 st.session_state['result'] = result
                 st.session_state['current_input'] = user_input
                 # 保存到历史记录
+                                # 保存到历史记录
                 save_analysis_history(user_input, result)
+                
+                # 同时保存到 Session State（当前会话）
+                import datetime
+                session_record = {
+                    "id": len(st.session_state.session_history) + 1,
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "input_text": user_input,
+                    "result": result
+                }
+                st.session_state.session_history.append(session_record)
+                
+                st.success("分析完成！已保存到历史记录。")
                 st.success("分析完成！已保存到历史记录。")
         else:
             st.warning("请输入内容")
@@ -357,10 +374,89 @@ if history:
         if idx < len(history_reversed) - 1:
             st.sidebar.markdown("---")
     
-    # 显示历史记录数量
+        # 显示历史记录数量
     st.sidebar.info(f"共保存 {len(history)} 条记录")
     
+    # 导出和导入历史记录
+    st.sidebar.divider()
+    st.sidebar.subheader("📥 数据管理")
+    
+    # 导出历史记录
+    if st.sidebar.button("📥 导出历史记录", use_container_width=True):
+        import datetime
+        import json
+        
+        # 准备导出的数据
+        export_data = {
+            "export_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_records": len(history),
+            "history": history
+        }
+        
+        # 创建下载按钮
+        json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
+        st.sidebar.download_button(
+            label="⬇️ 下载 JSON 文件",
+            data=json_str,
+            file_name=f"lingocontext_history_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    # 导入历史记录
+    st.sidebar.markdown("---")
+    uploaded_file = st.sidebar.file_uploader(
+        "📤 导入历史记录",
+        type=['json'],
+        help="选择之前导出的 JSON 文件来恢复历史记录"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            import json
+            # 读取上传的文件
+            content = uploaded_file.read().decode('utf-8')
+            import_data = json.loads(content)
+            
+            # 检查数据格式
+            if 'history' in import_data and isinstance(import_data['history'], list):
+                # 合并历史记录
+                existing_history = load_analysis_history()
+                existing_ids = {r.get('id') for r in existing_history}
+                
+                # 添加新记录（避免重复）
+                new_records = []
+                for record in import_data['history']:
+                    # 如果 ID 不存在，添加记录
+                    if record.get('id') not in existing_ids:
+                        new_records.append(record)
+                
+                if new_records:
+                    # 合并并保存
+                    merged_history = existing_history + new_records
+                    # 按时间戳排序
+                    merged_history.sort(key=lambda x: x.get('timestamp', ''))
+                    # 只保留最近 100 条
+                    if len(merged_history) > 100:
+                        merged_history = merged_history[-100:]
+                    
+                    # 保存到文件
+                    import os
+                    os.makedirs("data", exist_ok=True)
+                    with open("data/analysis_history.json", 'w', encoding='utf-8') as f:
+                        json.dump(merged_history, f, ensure_ascii=False, indent=2)
+                    
+                    st.sidebar.success(f"✅ 成功导入 {len(new_records)} 条记录！")
+                    st.rerun()
+                else:
+                    st.sidebar.info("ℹ️ 没有新记录需要导入（可能已存在）")
+            else:
+                st.sidebar.error("❌ 文件格式不正确，请确保是导出的历史记录文件")
+        except Exception as e:
+            st.sidebar.error(f"❌ 导入失败: {str(e)}")
+    
     # 清空历史记录按钮
+    st.sidebar.divider()
     if st.sidebar.button("🗑️ 清空历史记录", type="secondary"):
         import os
         import json
@@ -371,7 +467,37 @@ if history:
             st.rerun()
 else:
     st.sidebar.info("暂无历史记录")
-
+    
+    # 即使没有历史记录，也显示导入功能
+    st.sidebar.divider()
+    st.sidebar.subheader("📥 数据管理")
+    uploaded_file = st.sidebar.file_uploader(
+        "📤 导入历史记录",
+        type=['json'],
+        help="选择之前导出的 JSON 文件来恢复历史记录"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            import json
+            import os
+            content = uploaded_file.read().decode('utf-8')
+            import_data = json.loads(content)
+            
+            if 'history' in import_data and isinstance(import_data['history'], list):
+                # 确保 data 目录存在
+                os.makedirs("data", exist_ok=True)
+                
+                # 保存导入的历史记录
+                with open("data/analysis_history.json", 'w', encoding='utf-8') as f:
+                    json.dump(import_data['history'], f, ensure_ascii=False, indent=2)
+                
+                st.sidebar.success(f"✅ 成功导入 {len(import_data['history'])} 条记录！")
+                st.rerun()
+            else:
+                st.sidebar.error("❌ 文件格式不正确")
+        except Exception as e:
+            st.sidebar.error(f"❌ 导入失败: {str(e)}")
 st.sidebar.divider()
 
 # 生词管理
